@@ -1,0 +1,31 @@
+[Unit]
+Description=VPN Authentication Service
+After=network.target wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/vpn-server
+Environment="PATH=/opt/vpn-server/venv/bin"
+Environment="PYTHONPATH=/opt/vpn-server"
+ExecStart=/opt/vpn-server/venv/bin/python -m uvicorn auth_service.main:app --host 0.0.0.0 --port 8443 --workers 4
+
+Restart=always
+RestartSec=10
+StartLimitInterval=0
+
+# Security hardening
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/vpn /var/log/vpn /etc/wireguard
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vpn-auth
+
+[Install]
+WantedBy=multi-user.target

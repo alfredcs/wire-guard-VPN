@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  vpn-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    container_name: vpn-server
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    ports:
+      - "51820:51820/udp"
+      - "8443:8443/tcp"
+    volumes:
+      - wireguard-data:/etc/wireguard
+      - vpn-data:/var/lib/vpn
+    environment:
+      - DATABASE_URL=sqlite:////var/lib/vpn/vpn.db
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-this-in-production}
+      - WG_INTERFACE=wg0
+      - WG_PORT=51820
+      - WG_ADDRESS=10.0.0.1/24
+      - API_PORT=8443
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    container_name: vpn-postgres
+    environment:
+      - POSTGRES_DB=vpn_db
+      - POSTGRES_USER=vpn_user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  wireguard-data:
+  vpn-data:
+  postgres-data:

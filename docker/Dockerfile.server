@@ -1,0 +1,35 @@
+FROM fedora:latest
+
+# Install dependencies
+RUN dnf install -y \
+    wireguard-tools \
+    python3 \
+    python3-pip \
+    python3-virtualenv \
+    iptables \
+    && dnf clean all
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements
+COPY server/requirements.txt .
+
+# Create virtual environment and install dependencies
+RUN python3 -m venv /app/venv && \
+    /app/venv/bin/pip install --upgrade pip && \
+    /app/venv/bin/pip install -r requirements.txt
+
+# Copy application
+COPY server/auth_service /app/auth_service
+COPY server/cli /app/cli
+COPY .env.example /app/.env
+
+# Expose ports
+EXPOSE 8443
+
+# Enable IP forwarding
+RUN echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
+
+# Start command
+CMD ["/app/venv/bin/python", "-m", "uvicorn", "auth_service.main:app", "--host", "0.0.0.0", "--port", "8443"]
