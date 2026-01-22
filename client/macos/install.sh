@@ -66,8 +66,8 @@ sudo "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 echo -e "${GREEN}[5/5] Creating CLI command...${NC}"
 sudo tee /usr/local/bin/vpn-client > /dev/null <<EOF
 #!/bin/bash
-source /usr/local/lib/vpn-client/venv/bin/activate
-python -m vpn_client.main "\$@"
+export PYTHONPATH="/usr/local/lib/vpn-client:\$PYTHONPATH"
+/usr/local/lib/vpn-client/venv/bin/python -m vpn_client.main "\$@"
 EOF
 
 sudo chmod +x /usr/local/bin/vpn-client
