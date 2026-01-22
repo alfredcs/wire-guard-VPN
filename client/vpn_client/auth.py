@@ -13,10 +13,16 @@ logger = logging.getLogger(__name__)
 class AuthClient:
     """Authentication client for VPN service."""
 
-    def __init__(self, server_url: str):
+    def __init__(self, server_url: str, verify: bool = True):
+        """Initialize authentication client.
+
+        Args:
+            server_url: VPN server URL
+            verify: Whether to verify SSL certificates (set False for self-signed certs)
+        """
         self.server_url = server_url.rstrip('/')
         self.session = requests.Session()
-        self.session.verify = True  # Enable SSL verification in production
+        self.session.verify = verify
 
     def login(self, username: str, password: str) -> Tuple[str, str]:
         """Login and get tokens.

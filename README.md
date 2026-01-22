@@ -26,7 +26,7 @@ Production-ready WireGuard VPN server with Python-based bearer token authenticat
 
 ## Quick Start
 
-### Server Installation (Fedora)
+### Server Installation (Fedora/Ubuntu)
 
 ```bash
 # Clone repository

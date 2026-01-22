@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# VPN Server Installation Script for Fedora
+# VPN Server Installation Script for Fedora and Ubuntu/Debian
 # This script installs and configures the VPN server with WireGuard and authentication service
 #
 
@@ -28,9 +28,25 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Check if running on Fedora
-if [ ! -f /etc/fedora-release ]; then
-    echo -e "${YELLOW}Warning: This script is designed for Fedora Linux${NC}"
+# Detect distribution
+DISTRO="unknown"
+if [ -f /etc/fedora-release ]; then
+    DISTRO="fedora"
+    echo -e "${GREEN}Detected: Fedora Linux${NC}"
+elif [ -f /etc/debian_version ]; then
+    # Check if it's Ubuntu or Debian
+    if grep -qi "ubuntu" /etc/os-release 2>/dev/null; then
+        DISTRO="ubuntu"
+        echo -e "${GREEN}Detected: Ubuntu Linux${NC}"
+    else
+        DISTRO="debian"
+        echo -e "${GREEN}Detected: Debian Linux${NC}"
+    fi
+elif [ -f /etc/redhat-release ]; then
+    DISTRO="rhel"
+    echo -e "${GREEN}Detected: RHEL/CentOS Linux${NC}"
+else
+    echo -e "${YELLOW}Warning: Unknown distribution. This script supports Fedora, Ubuntu, and Debian.${NC}"
     read -p "Continue anyway? (y/N) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -38,18 +54,61 @@ if [ ! -f /etc/fedora-release ]; then
     fi
 fi
 
-echo -e "${GREEN}[1/8] Installing system dependencies...${NC}"
-dnf install -y \
-    wireguard-tools \
-    python3 \
-    python3-pip \
-    python3-virtualenv \
-    git \
-    iptables \
-    firewalld \
-    openssl
+echo -e "${GREEN}[1/9] Installing system dependencies...${NC}"
 
-echo -e "${GREEN}[2/8] Enabling IP forwarding...${NC}"
+# Install packages based on distribution
+case "$DISTRO" in
+    fedora|rhel)
+        dnf install -y \
+            wireguard-tools \
+            python3 \
+            python3-pip \
+            python3-virtualenv \
+            git \
+            iptables \
+            firewalld \
+            openssl
+        ;;
+    ubuntu|debian)
+        # Update package lists
+        apt-get update
+
+        # Install packages
+        apt-get install -y \
+            wireguard \
+            wireguard-tools \
+            python3 \
+            python3-pip \
+            python3-venv \
+            git \
+            iptables \
+            openssl
+
+        # Install ufw if not present (Ubuntu default firewall)
+        if ! command -v ufw &> /dev/null; then
+            apt-get install -y ufw
+        fi
+        ;;
+    *)
+        echo -e "${YELLOW}Attempting to install packages using available package manager...${NC}"
+        if command -v dnf &> /dev/null; then
+            dnf install -y wireguard-tools python3 python3-pip python3-virtualenv git iptables openssl
+        elif command -v apt-get &> /dev/null; then
+            apt-get update
+            apt-get install -y wireguard wireguard-tools python3 python3-pip python3-venv git iptables openssl
+        elif command -v yum &> /dev/null; then
+            yum install -y wireguard-tools python3 python3-pip git iptables openssl
+        else
+            echo -e "${RED}Error: No supported package manager found${NC}"
+            exit 1
+        fi
+        ;;
+esac
+
+# Export DISTRO for child scripts
+export DISTRO
+
+echo -e "${GREEN}[2/9] Enabling IP forwarding...${NC}"
 # Enable IP forwarding
 sysctl -w net.ipv4.ip_forward=1
 sysctl -w net.ipv6.conf.all.forwarding=1
@@ -60,7 +119,7 @@ net.ipv4.ip_forward = 1
 net.ipv6.conf.all.forwarding = 1
 EOF
 
-echo -e "${GREEN}[3/8] Creating directories...${NC}"
+echo -e "${GREEN}[3/9] Creating directories...${NC}"
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$CONFIG_DIR/certs"
@@ -68,7 +127,7 @@ mkdir -p "$LOG_DIR"
 mkdir -p "$DATA_DIR"
 mkdir -p /etc/wireguard
 
-echo -e "${GREEN}[4/8] Setting up Python virtual environment...${NC}"
+echo -e "${GREEN}[4/9] Setting up Python virtual environment...${NC}"
 # Create virtual environment
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
@@ -80,7 +139,7 @@ pip install --upgrade pip
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
-echo -e "${GREEN}[5/8] Installing Python dependencies...${NC}"
+echo -e "${GREEN}[5/9] Installing Python dependencies...${NC}"
 cd "$PROJECT_ROOT/server"
 pip install -r requirements.txt
 
@@ -105,15 +164,43 @@ fi
 # Create symlink for .env
 ln -sf "$CONFIG_DIR/.env" "$INSTALL_DIR/.env"
 
-echo -e "${GREEN}[6/8] Configuring WireGuard...${NC}"
+echo -e "${GREEN}[6/9] Generating SSL certificates...${NC}"
+# Generate SSL certificates if they don't exist
+SSL_CERT="$CONFIG_DIR/certs/cert.pem"
+SSL_KEY="$CONFIG_DIR/certs/key.pem"
+
+if [ ! -f "$SSL_CERT" ] || [ ! -f "$SSL_KEY" ]; then
+    echo "Generating self-signed SSL certificate..."
+
+    # Get server hostname/IP for certificate
+    SERVER_NAME="${VPN_SERVER_NAME:-$(hostname -f 2>/dev/null || hostname)}"
+
+    # Generate self-signed certificate valid for 365 days
+    openssl req -x509 -newkey rsa:4096 \
+        -keyout "$SSL_KEY" \
+        -out "$SSL_CERT" \
+        -sha256 -days 365 -nodes \
+        -subj "/CN=$SERVER_NAME" \
+        -addext "subjectAltName=DNS:$SERVER_NAME,DNS:localhost,IP:127.0.0.1"
+
+    chmod 600 "$SSL_KEY"
+    chmod 644 "$SSL_CERT"
+
+    echo -e "${GREEN}SSL certificate generated for: $SERVER_NAME${NC}"
+    echo -e "${YELLOW}Note: This is a self-signed certificate. For production, use a proper CA-signed certificate.${NC}"
+else
+    echo -e "${GREEN}SSL certificates already exist, skipping generation${NC}"
+fi
+
+echo -e "${GREEN}[7/9] Configuring WireGuard...${NC}"
 # Run WireGuard setup script
 bash "$SCRIPT_DIR/setup_wireguard.sh"
 
-echo -e "${GREEN}[7/8] Configuring firewall...${NC}"
+echo -e "${GREEN}[8/9] Configuring firewall...${NC}"
 # Run firewall setup script
 bash "$SCRIPT_DIR/setup_firewall.sh"
 
-echo -e "${GREEN}[8/8] Installing systemd services...${NC}"
+echo -e "${GREEN}[9/9] Installing systemd services...${NC}"
 # Install systemd service
 cat > /etc/systemd/system/vpn-auth.service <<EOF
 [Unit]
@@ -128,7 +215,9 @@ Environment="PATH=$VENV_DIR/bin"
 ExecStart=$VENV_DIR/bin/python -m uvicorn auth_service.main:app \\
     --host 0.0.0.0 \\
     --port 8443 \\
-    --workers 4
+    --workers 4 \\
+    --ssl-keyfile=$CONFIG_DIR/certs/key.pem \\
+    --ssl-certfile=$CONFIG_DIR/certs/cert.pem
 Restart=always
 RestartSec=10
 
@@ -167,9 +256,10 @@ echo "2. Start WireGuard: systemctl start wg-quick@wg0"
 echo "3. Start VPN auth service: systemctl start vpn-auth"
 echo "4. Create an admin user: vpn-admin user add <username> <email>"
 echo ""
-echo "For SSL/TLS support:"
-echo "- Generate or obtain SSL certificates"
-echo "- Place them in $CONFIG_DIR/certs/"
-echo "- Update TLS settings in $CONFIG_DIR/.env"
+echo "SSL/TLS:"
+echo "- Self-signed certificate generated at $CONFIG_DIR/certs/"
+echo "- Server runs HTTPS on port 8443"
+echo "- For production, replace with CA-signed certificates (e.g., Let's Encrypt)"
+echo "- Clients can use --insecure flag for self-signed certs"
 echo ""
 echo -e "${YELLOW}Remember to configure your firewall and ensure required ports are open${NC}"

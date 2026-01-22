@@ -37,7 +37,9 @@ def get_auth_client() -> AuthClient:
         console.print("[red]Error: Not logged in. Please run 'vpn-client login' first.[/red]")
         sys.exit(1)
 
-    return AuthClient(server_url)
+    # Check if SSL verification should be disabled (for self-signed certs)
+    insecure = config.get("insecure", False)
+    return AuthClient(server_url, verify=not insecure)
 
 
 @click.group()
@@ -54,7 +56,8 @@ def cli():
 @click.argument("server_url")
 @click.option("--username", "-u", help="Username")
 @click.option("--password", "-p", help="Password (not recommended, will prompt if not provided)")
-def login(server_url: str, username: str, password: str):
+@click.option("--insecure", "-k", is_flag=True, help="Disable SSL certificate verification (for self-signed certs)")
+def login(server_url: str, username: str, password: str, insecure: bool):
     """Login to VPN server."""
     try:
         # Get username if not provided
@@ -66,12 +69,18 @@ def login(server_url: str, username: str, password: str):
             password = getpass("Password: ")
 
         # Create auth client and login
-        auth_client = AuthClient(server_url)
+        auth_client = AuthClient(server_url, verify=not insecure)
         access_token, refresh_token = auth_client.login(username, password)
+
+        # Store insecure setting for subsequent requests
+        if insecure:
+            config.set("insecure", True)
 
         console.print(f"[green]✓[/green] Login successful")
         console.print(f"  Server: {server_url}")
         console.print(f"  Username: {username}")
+        if insecure:
+            console.print(f"  [yellow]SSL verification: Disabled[/yellow]")
         console.print(f"\nUse 'vpn-client connect' to connect to VPN")
 
     except Exception as e:
@@ -186,7 +195,8 @@ def status():
             console.print(f"Username: {username}")
 
             # Check if token is valid
-            auth_client = AuthClient(server_url)
+            insecure = config.get("insecure", False)
+            auth_client = AuthClient(server_url, verify=not insecure)
             if auth_client.validate_token():
                 console.print("Authentication: [green]Valid[/green]")
             else:
